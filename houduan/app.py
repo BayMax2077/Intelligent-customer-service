@@ -37,6 +37,15 @@ def create_app() -> Flask:
     app.config["STATIC_DIST"] = static_dist
     app.config.from_object(Config())
 
+    # 会话 Cookie 策略：确保跨端口(5174->5002)的 XHR 能携带会话
+    # 本地开发为 HTTP，生产(HTTPS)需将 SECURE 设为 True
+    is_https = False
+    app.config["SESSION_COOKIE_NAME"] = "ics_session"
+    # 开发(HTTP)下使用 Lax，生产(HTTPS)可配 None+Secure
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax" if not is_https else "None"
+    app.config["SESSION_COOKIE_SECURE"] = bool(is_https)
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+
     # 初始化扩展
     db.init_app(app)
     migrate.init_app(app, db)
@@ -58,13 +67,20 @@ def create_app() -> Flask:
     except Exception as e:
         print(f"数据库管理器初始化失败: {e}")
         # 继续运行，使用简化版API
-    # 开发联调需要携带 Cookie，不能使用 *，同时允许本机端口的前端来源
-    # 构建本机常用端口白名单，确保带 Cookie 的跨域请求可用
+    # 开发联调需要携带 Cookie，不能使用 *。为了兼容局域网 IP 访问（如 192.168.x.x），
+    # 这里放宽跨域来源：localhost/127.0.0.1 以及常见内网网段 192.168.*.* / 10.*.*.* / 172.16-31.*.*
+    import re
     ports = list(range(5173, 5201))
-    origins = [f"http://localhost:{p}" for p in ports] + [f"http://127.0.0.1:{p}" for p in ports]
+    static_origins = [
+        *(f"http://localhost:{p}" for p in ports),
+        *(f"http://127.0.0.1:{p}" for p in ports),
+    ]
+    # 允许常见内网网段（带端口）
+    lan_origin_pattern = re.compile(r"^https?://(?:(?:192\.168|10\.|172\.(?:1[6-9]|2[0-9]|3[0-1]))\.[0-9]{1,3}\.[0-9]{1,3}):[0-9]+$")
+
     CORS(
         app,
-        resources={r"/*": {"origins": origins, "supports_credentials": True}},
+        resources={r"/*": {"origins": static_origins + [lan_origin_pattern], "supports_credentials": True}},
         allow_headers=["Content-Type", "Authorization"],
         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         supports_credentials=True,
@@ -82,6 +98,26 @@ def create_app() -> Flask:
             resp.headers["Access-Control-Allow-Credentials"] = "true"
             resp.headers.setdefault("Access-Control-Allow-Headers", "Content-Type, Authorization")
             resp.headers.setdefault("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        # 强制为会话 Cookie 附加 SameSite/Secure 以支持跨端口请求
+        try:
+            session_cookie_name = app.config.get("SESSION_COOKIE_NAME", "session")
+            cookies = resp.headers.getlist("Set-Cookie")
+            if cookies:
+                new_cookies = []
+                for c in cookies:
+                    if c.startswith(f"{session_cookie_name}="):
+                        if "SameSite" not in c:
+                            same_site = "None" if app.config.get("SESSION_COOKIE_SECURE") else "Lax"
+                            c += f"; SameSite={same_site}"
+                        if app.config.get("SESSION_COOKIE_SECURE") and "Secure" not in c:
+                            c += "; Secure"
+                    new_cookies.append(c)
+                # 先删除再重新设置，避免重复
+                del resp.headers["Set-Cookie"]
+                for c in new_cookies:
+                    resp.headers.add("Set-Cookie", c)
+        except Exception:
+            pass
         return resp
 
     # 统一处理所有 OPTIONS 预检
@@ -114,12 +150,28 @@ def create_app() -> Flask:
     # 配置 user_loader
     @login_manager.user_loader
     def load_user(user_id: str):
-        from .models import User
-        user = db.session.get(User, int(user_id))
-        if user:
+        """从数据库加载用户（使用原生引擎，避免绑定问题）"""
+        try:
+            from flask import current_app
+            from sqlalchemy import create_engine, text
+            database_url = current_app.config.get("SQLALCHEMY_DATABASE_URI")
+            engine = create_engine(database_url)
+            with engine.connect() as conn:
+                row = conn.execute(
+                    text("SELECT id, username, role FROM users WHERE id = :i LIMIT 1"),
+                    {"i": int(user_id)},
+                ).mappings().first()
+            if not row:
+                return None
+            class UserObj:
+                def __init__(self, row):
+                    self.id = row["id"]
+                    self.username = row["username"]
+                    self.role = row["role"]
             from .api.auth import LoginUser
-            return LoginUser(user)
-        return None
+            return LoginUser(UserObj(row))
+        except Exception:
+            return None
 
     # 动态选择API模式
     try:
@@ -190,9 +242,11 @@ def create_app() -> Flask:
             pass
         
         try:
-            # 检查OCR服务（如果安装了PaddleOCR）
-            from .services.qianniu_monitor import _ocr_client
-            ocr_status = "ok" if _ocr_client is not None else "not_installed"
+            # 检查OCR服务（检查PaddleOCR模块是否可导入）
+            from paddleocr import PaddleOCR
+            ocr_status = "ok"
+        except ImportError:
+            ocr_status = "not_installed"
         except Exception:
             ocr_status = "error"
         
@@ -280,8 +334,8 @@ def create_app() -> Flask:
 
 
 if __name__ == "__main__":
-    # 方便本地调试: python -m houduan.app
+    # 方便本地调试: 固定默认端口为 5002
     application = create_app()
-    application.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    application.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5002)))
 
 

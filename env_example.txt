@@ -1,0 +1,28 @@
+# 智能客服系统环境配置
+# 复制此文件为 .env 并修改相应配置
+
+# 数据库配置
+# DATABASE_URL=sqlite:///data/sqlite.db
+# DATABASE_URL=mysql://user:password@localhost/smart_cs
+
+# AI模型配置（至少配置一个）
+# OPENAI_API_KEY=your_openai_api_key
+# OPENAI_MODEL=gpt-4o-mini
+
+# 通义千问配置
+# QWEN_API_KEY=your_qwen_api_key
+# QWEN_MODEL=qwen-turbo
+
+# 文心一言配置
+# ERNIE_API_KEY=your_ernie_api_key
+# ERNIE_SECRET_KEY=your_ernie_secret_key
+# ERNIE_MODEL=ernie-bot-turbo
+
+# 告警配置（可选）
+# ALERT_SMTP_SERVER=smtp.gmail.com
+# ALERT_SMTP_PORT=587
+# ALERT_EMAIL_USERNAME=your_email@gmail.com
+# ALERT_EMAIL_PASSWORD=your_app_password
+# ALERT_EMAIL_TO=admin@example.com,alert@example.com
+# ALERT_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=your_key
+# ALERT_WEBHOOK_TYPE=wechat

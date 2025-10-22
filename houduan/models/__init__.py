@@ -25,6 +25,11 @@ class User(db.Model, TimestampMixin):
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(32), nullable=False, default="agent")  # superadmin/admin/agent
     shop_id = db.Column(db.Integer, db.ForeignKey("shops.id"), nullable=True)
+    
+    def check_password(self, password: str) -> bool:
+        """检查密码是否正确"""
+        from werkzeug.security import check_password_hash
+        return check_password_hash(self.password_hash, password)
 
 
 class Shop(db.Model, TimestampMixin):

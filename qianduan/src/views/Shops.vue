@@ -88,8 +88,12 @@
         </el-table-column>
         <el-table-column label="操作" width="150" align="center">
           <template #default="{ row }">
-            <el-button size="small" @click="editShop(row)">编辑</el-button>
-            <el-button size="small" type="danger" @click="deleteShop(row)">删除</el-button>
+            <el-button size="small" @click="editShop(row)" :loading="false">
+              编辑
+            </el-button>
+            <el-button size="small" type="danger" @click="deleteShop(row)">
+              删除
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -287,18 +291,59 @@ const addNewShop = () => {
 }
 
 const editShop = (shop: any) => {
-  editingShop.value = shop
-  formData.name = shop.name
-  formData.qianniu_title = shop.qianniu_title
-  formData.ocr_region_text = shop.ocr_region ? shop.ocr_region.join(',') : '800,200,600,300'
-  formData.unread_threshold = shop.unread_threshold || 0.02
-  formData.ai_model = shop.ai_model || 'stub'
-  formData.auto_mode = shop.auto_mode || false
-  formData.blacklist_text = shop.blacklist ? shop.blacklist.join('\n') : ''
-  formData.whitelist_text = shop.whitelist ? shop.whitelist.join('\n') : ''
-  formData.business_hours = shop.business_hours ? [shop.business_hours.start, shop.business_hours.end] : null
-  formData.reply_delay = shop.reply_delay || 2
-  showAddDialog.value = true
+  console.log('编辑店铺被点击:', shop)
+  
+  try {
+    // 设置编辑状态
+    editingShop.value = shop
+    
+    // 填充表单数据
+    formData.name = shop.name || ''
+    formData.qianniu_title = shop.qianniu_title || ''
+    
+    // 安全处理ocr_region字段
+    if (shop.ocr_region && Array.isArray(shop.ocr_region)) {
+      formData.ocr_region_text = shop.ocr_region.join(',')
+    } else if (shop.ocr_region && typeof shop.ocr_region === 'string') {
+      formData.ocr_region_text = shop.ocr_region
+    } else {
+      formData.ocr_region_text = '800,200,600,300'
+    }
+    
+    formData.unread_threshold = shop.unread_threshold || 0.02
+    formData.ai_model = shop.ai_model || 'stub'
+    formData.auto_mode = shop.auto_mode || false
+    
+    // 安全处理blacklist字段
+    if (shop.blacklist && Array.isArray(shop.blacklist)) {
+      formData.blacklist_text = shop.blacklist.join('\n')
+    } else {
+      formData.blacklist_text = ''
+    }
+    
+    // 安全处理whitelist字段
+    if (shop.whitelist && Array.isArray(shop.whitelist)) {
+      formData.whitelist_text = shop.whitelist.join('\n')
+    } else {
+      formData.whitelist_text = ''
+    }
+    
+    formData.business_hours = shop.business_hours ? [shop.business_hours.start, shop.business_hours.end] : null as any
+    formData.reply_delay = shop.reply_delay || 2
+    
+    console.log('表单数据已填充:', formData)
+    
+    // 强制显示对话框
+    showAddDialog.value = false
+    setTimeout(() => {
+      showAddDialog.value = true
+      console.log('对话框已显示:', showAddDialog.value)
+    }, 100)
+    
+  } catch (error) {
+    console.error('编辑店铺时出错:', error)
+    ElMessage.error('编辑店铺时出错: ' + error.message)
+  }
 }
 
 const deleteShop = async (shop: any) => {
@@ -348,8 +393,8 @@ const saveShop = async () => {
     const whitelist = formData.whitelist_text.split('\n').map(x => x.trim()).filter(x => x)
     
     // 处理营业时间
-    let business_hours = null
-    if (formData.business_hours && formData.business_hours.length === 2) {
+    let business_hours: any = null
+    if (formData.business_hours && Array.isArray(formData.business_hours) && formData.business_hours.length === 2) {
       business_hours = {
         start: formData.business_hours[0],
         end: formData.business_hours[1]
@@ -437,9 +482,55 @@ const resetForm = () => {
   formData.reply_delay = 2
 }
 
+// 备用编辑处理函数
+const handleEditClick = (shop: any) => {
+  console.log('备用编辑处理函数被调用:', shop)
+  editShop(shop)
+}
+
+// 强制绑定编辑按钮事件
+const bindEditButtons = () => {
+  setTimeout(() => {
+    const editButtons = document.querySelectorAll('button')
+    editButtons.forEach(button => {
+      if (button.textContent?.includes('编辑')) {
+        // 移除现有事件
+        button.onclick = null
+        // 添加新事件
+        button.addEventListener('click', function(event) {
+          event.preventDefault()
+          event.stopPropagation()
+          console.log('编辑按钮被点击 (备用处理)')
+          const row = button.closest('tr')
+          if (row) {
+            const cells = row.querySelectorAll('td')
+            const shopData = {
+              id: parseInt(cells[0]?.textContent?.trim() || '0'),
+              name: cells[1]?.textContent?.trim().replace('● ', '') || '',
+              qianniu_title: cells[2]?.textContent?.trim() || '',
+              ocr_region: [800, 200, 600, 300], // 默认OCR区域
+              unread_threshold: 0.02,
+              ai_model: 'stub',
+              auto_mode: false,
+              blacklist: [], // 确保是数组
+              whitelist: [], // 确保是数组
+              business_hours: null,
+              reply_delay: 2
+            }
+            console.log('从表格提取的店铺数据:', shopData)
+            editShop(shopData)
+          }
+        })
+        console.log('编辑按钮事件已重新绑定')
+      }
+    })
+  }, 1000)
+}
+
 // 初始化
 load()
 loadTemplates()
+bindEditButtons()
 </script>
 
 <style scoped>

@@ -32,18 +32,29 @@ def login():
         username = data.get("username", "").strip()
         password = data.get("password", "")
         
-        # 模拟用户数据，避免SQLAlchemy问题
-        mock_users = {
-            "admin": {"id": 1, "username": "admin", "role": "superadmin", "password": "admin123"},
-            "superadmin": {"id": 2, "username": "superadmin", "role": "superadmin", "password": "superadmin123"},
-            "test": {"id": 3, "username": "test", "role": "admin", "password": "test123"},
-            "agent1": {"id": 4, "username": "agent1", "role": "agent", "password": "agent123"},
-            "agent2": {"id": 5, "username": "agent2", "role": "agent", "password": "agent123"}
-        }
+        # 验证输入是否为空
+        if not username or not password:
+            return jsonify({"error": "请输入用户名和密码"}), 400
         
-        user_data = mock_users.get(username)
-        if not user_data or user_data["password"] != password:
-            return jsonify({"error": "invalid_credentials"}), 401
+        # 从数据库获取用户数据（避免依赖 Flask-SQLAlchemy 绑定）
+        try:
+            from flask import current_app
+            from sqlalchemy import create_engine, text
+            from werkzeug.security import check_password_hash
+            database_url = current_app.config.get('SQLALCHEMY_DATABASE_URI')
+            engine = create_engine(database_url)
+            with engine.connect() as conn:
+                row = conn.execute(
+                    text("SELECT id, username, password_hash, role FROM users WHERE username = :u LIMIT 1"),
+                    {"u": username},
+                ).mappings().first()
+            if not row or not check_password_hash(row["password_hash"], password):
+                return jsonify({"error": "invalid_credentials"}), 401
+            
+            user_data = {"id": row["id"], "username": row["username"], "role": row["role"]}
+        except Exception as e:
+            # 数据库查询失败
+            return jsonify({"error": "database_error", "detail": str(e)}), 500
         
         # 创建模拟用户对象
         class MockUser:
@@ -56,7 +67,10 @@ def login():
         login_user(LoginUser(mock_user))
         return jsonify({"ok": True, "user": {"id": mock_user.id, "username": mock_user.username, "role": mock_user.role}})
     except Exception as e:
-        return jsonify({"error": "internal_error", "detail": str(e)}), 500
+        # 生产环境不暴露详细错误，开发环境可以打印日志
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "登录服务异常，请稍后重试"}), 500
 
 
 @api_bp.post("/auth/logout")

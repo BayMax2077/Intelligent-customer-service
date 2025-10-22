@@ -6,7 +6,7 @@ from loguru import logger
 # 延迟导入，避免SQLAlchemy连接问题
 # from ..app import db
 # from ..models import Shop, Message
-from .qianniu_monitor import poll_and_capture
+from .qianniu_monitor import poll_and_capture, cleanup_caches
 from .alert import check_system_health
 from ..utils.context_manager import context_manager, safe_db_query, safe_db_commit
 
@@ -22,6 +22,9 @@ def start_scheduler(app):
 
     @sched.scheduled_job('interval', seconds=10, id='qianniu_poll')
     def job_poll():
+        # 定期清理缓存
+        cleanup_caches()
+        
         # 保守处理：若数据库尚未初始化或绑定失败，不抛异常以免打断主请求流
         try:
             with context_manager.app_context(app):

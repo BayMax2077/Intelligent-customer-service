@@ -11,31 +11,44 @@ from werkzeug.security import generate_password_hash
 
 from . import api_bp
 
-# 模拟用户数据
-MOCK_USERS = [
-    {"id": 1, "username": "admin", "role": "superadmin", "shop_id": None, "password_hash": generate_password_hash("admin123"), "created_at": "2025-10-21T10:00:00", "updated_at": "2025-10-21T10:00:00"},
-    {"id": 2, "username": "superadmin", "role": "superadmin", "shop_id": None, "password_hash": generate_password_hash("superadmin123"), "created_at": "2025-10-21T10:01:00", "updated_at": "2025-10-21T10:01:00"},
-    {"id": 3, "username": "admin_shop1", "role": "admin", "shop_id": 1, "password_hash": generate_password_hash("admin123"), "created_at": "2025-10-21T10:02:00", "updated_at": "2025-10-21T10:02:00"},
-    {"id": 4, "username": "admin_shop2", "role": "admin", "shop_id": 2, "password_hash": generate_password_hash("admin123"), "created_at": "2025-10-21T10:03:00", "updated_at": "2025-10-21T10:03:00"},
-    {"id": 5, "username": "agent1_shop1", "role": "agent", "shop_id": 1, "password_hash": generate_password_hash("agent123"), "created_at": "2025-10-21T10:04:00", "updated_at": "2025-10-21T10:04:00"},
-    {"id": 6, "username": "agent2_shop1", "role": "agent", "shop_id": 1, "password_hash": generate_password_hash("agent123"), "created_at": "2025-10-21T10:05:00", "updated_at": "2025-10-21T10:05:00"},
-    {"id": 7, "username": "agent1_shop2", "role": "agent", "shop_id": 2, "password_hash": generate_password_hash("agent123"), "created_at": "2025-10-21T10:06:00", "updated_at": "2025-10-21T10:06:00"},
-    {"id": 8, "username": "agent1_shop3", "role": "agent", "shop_id": 3, "password_hash": generate_password_hash("agent123"), "created_at": "2025-10-21T10:07:00", "updated_at": "2025-10-21T10:07:00"}
-]
-
-# 模拟店铺数据
-MOCK_SHOPS = {
-    1: {"id": 1, "name": "测试店铺A"},
-    2: {"id": 2, "name": "测试店铺B"},
-    3: {"id": 3, "name": "测试店铺C"},
-    4: {"id": 4, "name": "测试店铺D"},
-}
+# 数据库查询函数
+def get_users_from_db():
+    """从数据库获取用户列表"""
+    try:
+        from ..app import db
+        from ..models import User, Shop
+        users = User.query.all()
+        result = []
+        for user in users:
+            shop_name = None
+            if user.shop_id:
+                shop = Shop.query.get(user.shop_id)
+                shop_name = shop.name if shop else f"未知店铺{user.shop_id}"
+            
+            result.append({
+                "id": user.id,
+                "username": user.username,
+                "role": user.role,
+                "shop_id": user.shop_id,
+                "shop_name": shop_name,
+                "created_at": user.created_at.isoformat() if user.created_at else None,
+                "updated_at": user.updated_at.isoformat() if user.updated_at else None
+            })
+        return result
+    except Exception:
+        return []
 
 def get_shop_name(shop_id):
     """获取店铺名称"""
     if not shop_id:
         return "全局"
-    return MOCK_SHOPS.get(shop_id, {}).get("name", f"未知店铺{shop_id}")
+    try:
+        from ..app import db
+        from ..models import Shop
+        shop = Shop.query.get(shop_id)
+        return shop.name if shop else f"未知店铺{shop_id}"
+    except Exception:
+        return f"未知店铺{shop_id}"
 
 
 @api_bp.get("/users")
@@ -46,11 +59,7 @@ def list_users():
     role = request.args.get("role")
     shop_id = request.args.get("shop_id", type=int)
 
-    all_users = []
-    for user in MOCK_USERS:
-        user_copy = user.copy()
-        user_copy["shop_name"] = get_shop_name(user_copy["shop_id"])
-        all_users.append(user_copy)
+    all_users = get_users_from_db()
     
     # 角色过滤
     if role:

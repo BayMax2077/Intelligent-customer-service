@@ -81,7 +81,12 @@
               <el-tag :type="getRoleType(row.role)" size="small">{{ getRoleText(row.role) }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="shop_name" label="所属店铺" width="150" />
+          <el-table-column prop="shop_name" label="所属店铺" width="150">
+            <template #default="{ row }">
+              <span v-if="row.shop_id === null || row.shop_id === undefined">全局知识库</span>
+              <span v-else>{{ row.shop_name }}</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="created_at" label="创建时间" width="180">
             <template #default="{ row }">
               <span class="date-cell">{{ formatDate(row.created_at) }}</span>
@@ -136,7 +141,7 @@
         </el-form-item>
         <el-form-item label="所属店铺" prop="shop_id">
           <el-select v-model="form.shop_id" placeholder="选择店铺" clearable style="width: 100%;">
-            <el-option label="全局" :value="null" />
+            <el-option label="全局知识库" :value="null" />
             <el-option v-for="shop in shops" :key="shop.id" :label="shop.name" :value="shop.id" />
           </el-select>
         </el-form-item>

@@ -2,7 +2,7 @@
   <div class="login-page">
     <div class="login-title">智能客服管理台</div>
     <div class="section-card login-card">
-      <p class="desc">使用管理员账号登录以管理店铺配置与审核队列。</p>
+      
       <el-form class="login-form" label-position="top" @submit.prevent="onLogin">
         <el-form-item label="用户名">
           <el-input v-model="username" @keyup.enter="onLogin" />
@@ -20,54 +20,60 @@
 import { ref } from 'vue'
 import http from '../api/http'
 import { useAuthStore } from '../store/auth'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 
-const username = ref('admin')
-const password = ref('admin')
+const username = ref('')
+const password = ref('')
 const loading = ref(false)
 const router = useRouter()
 const auth = useAuthStore()
 
 const onLogin = async () => {
+  // 前端验证
   if (!username.value || !password.value) {
     ElMessage.error('请输入用户名和密码')
     return
   }
+  
   loading.value = true
   try {
-    const res = await http.post('/api/auth/login', { username: username.value, password: password.value })
-    if ((res.status === 200 || res.status === 204) && res.data && (res.data.ok || res.data.OK || res.data.success)) {
+    const res = await http.post('/api/auth/login', { 
+      username: username.value, 
+      password: password.value 
+    })
+    
+    if ((res.status === 200 || res.status === 204) && 
+        res.data && (res.data.ok || res.data.OK || res.data.success)) {
       auth.setAuthed(true, username.value)
       router.push('/shops')
     } else {
       ElMessage.error('登录失败')
     }
-  } catch (e:any) {
+  } catch (e: any) {
+    // 统一处理各种错误情况
     const status = e?.response?.status
-    const statusText = e?.response?.statusText
     const data = e?.response?.data
-    const isNetwork = e?.message && String(e.message).includes('Network')
-    const hint = isNetwork ? '网络或跨域被浏览器拦截（预检/CORS/证书）' : ''
-    const brief = data?.error || data?.message || e?.message || '登录失败'
-    ElMessage.error(`${brief}${hint ? ' - ' + hint : ''}`)
-    try {
-      const detail = {
-        url: e?.config?.baseURL ? `${e.config.baseURL}${e?.config?.url || ''}` : (e?.config?.url || ''),
-        method: e?.config?.method,
-        withCredentials: e?.config?.withCredentials,
-        requestHeaders: e?.config?.headers,
-        status,
-        statusText,
-        responseHeaders: e?.response?.headers,
-        data,
+    
+    // 优先使用后端返回的错误信息
+    let errorMsg = data?.error || data?.message
+    
+    // 如果没有后端错误信息，根据状态码提供友好提示
+    if (!errorMsg) {
+      if (status === 401) {
+        errorMsg = '用户名或密码错误'
+      } else if (status === 400) {
+        errorMsg = '请求参数错误'
+      } else if (status === 500) {
+        errorMsg = '服务器错误，请稍后重试'
+      } else if (e?.message && String(e.message).includes('Network')) {
+        errorMsg = '网络连接失败，请检查网络设置'
+      } else {
+        errorMsg = '登录失败，请稍后重试'
       }
-      await ElMessageBox.alert(`<pre style="white-space:pre-wrap;word-break:break-all;max-height:60vh;overflow:auto">${
-        typeof window !== 'undefined' ? window.location.href : ''
-      }\n\n${hint ? '[提示] ' + hint + '\n\n' : ''}${
-        JSON.stringify(detail, null, 2)
-      }</pre>`, '登录失败 - 详细信息', { dangerouslyUseHTMLString: true, confirmButtonText: '我知道了' })
-    } catch {}
+    }
+    
+    ElMessage.error(errorMsg)
   } finally {
     loading.value = false
   }

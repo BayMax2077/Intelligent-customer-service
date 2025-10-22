@@ -1,0 +1,25 @@
+{
+  "name": "微信测试店铺",
+  "qianniu_title": "微信",
+  "ocr_region": [600, 150, 800, 600],
+  "chat_region": [600, 150, 800, 600],
+  "unread_threshold": 0.02,
+  "hash_threshold": 5,
+  "ai_model": "stub",
+  "auto_mode": false,
+  "blacklist": [],
+  "whitelist": [],
+  "business_hours": {
+    "start": "09:00",
+    "end": "18:00"
+  },
+  "reply_delay": 2,
+  "description": "微信PC客户端OCR配置模板",
+  "notes": [
+    "ocr_region: [x, y, width, height] - OCR检测区域坐标",
+    "chat_region: [x, y, width, height] - 聊天内容区域坐标", 
+    "unread_threshold: 0.0-1.0 - 红点检测阈值，建议0.02-0.06",
+    "hash_threshold: 1-10 - 图像变化敏感度，值越小越敏感",
+    "请根据实际微信窗口位置调整坐标"
+  ]
+}

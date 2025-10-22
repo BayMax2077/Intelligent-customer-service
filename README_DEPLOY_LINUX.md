@@ -301,6 +301,16 @@ sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 编辑 `nginx/conf.d/smart-cs.conf`，取消注释HTTPS配置部分。
 
 ### 2. 数据持久化
+### 2. 会话 Cookie 设置
+
+- 必须使用 HTTPS 并设置如下变量以确保登录状态：
+
+```bash
+SESSION_COOKIE_SAMESITE="None"
+SESSION_COOKIE_SECURE="True"
+```
+
+- 开发/内网 HTTP 调试时，可保持 `SESSION_COOKIE_SECURE=False`，但 `SameSite=None` 以允许跨端口请求携带 Cookie。
 
 #### 数据库备份
 ```bash

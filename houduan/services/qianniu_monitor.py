@@ -15,12 +15,13 @@ from __future__ import annotations
 import time
 import hashlib
 from datetime import datetime, timedelta
-from typing import List, Optional, Tuple, Set
+from typing import List, Optional, Tuple, Set, Dict
 
 import pyautogui
 import win32gui
 import win32con
 from PIL import Image
+import imagehash
 
 # 可选OCR依赖（PaddleOCR），未安装时降级为空实现
 try:
@@ -33,6 +34,10 @@ except Exception:  # pragma: no cover - 环境未装OCR
 # 消息去重缓存（内存中，重启后清空）
 _message_cache: Set[str] = set()
 _cache_cleanup_time = datetime.now()
+
+# 图像哈希缓存：存储区域的最近哈希值
+_region_hash_cache: Dict[str, str] = {}
+_ocr_result_cache: Dict[str, Tuple[str, datetime]] = {}  # 哈希 -> (文本, 时间)
 
 
 def list_windows_by_title(keyword: str) -> List[str]:
@@ -180,27 +185,166 @@ def is_duplicate_message(text: str, shop_id: int) -> bool:
 
 
 def poll_and_capture(shop_config: dict, shop_id: int = 1) -> Tuple[float, str]:
-    """根据店铺配置进行未读检测与OCR采集。
-
+    """三层混合检测：红点检测 → 区域哈希对比 → OCR识别
+    
     shop_config keys:
-      - ocr_region: [x,y,w,h]
-      - unread_threshold: float 0~1
+      - ocr_region: [x,y,w,h] OCR检测区域
+      - unread_threshold: float 0~1 未读阈值
+      - hash_threshold: int (可选) 图像变化敏感度，默认5
+    
     返回: (score, text)
     """
     region = tuple(shop_config.get("ocr_region", [0, 700, 300, 300]))
     threshold = float(shop_config.get("unread_threshold", 0.02))
+    hash_threshold = int(shop_config.get("hash_threshold", 5))
+    
+    # 第一层：红点检测（最快）
     img = screenshot_region(region)
     score = unread_score(img)
-    if score >= threshold:
-        # 认为有未读，进行更大区域OCR
-        chat_region = tuple(shop_config.get("chat_region", region))
-        text = ocr_text(screenshot_region(chat_region))
-        
-        # 去重检查
-        if is_duplicate_message(text, shop_id):
-            return score, ""  # 重复消息，返回空文本
-        
-        return score, text or ""
-    return score, ""
+    
+    if score < threshold:
+        # 没有未读标识，直接返回
+        return score, ""
+    
+    # 第二层：区域哈希对比（判断内容是否变化）
+    cache_key = get_region_cache_key(shop_id, region)
+    
+    if not has_region_changed(img, cache_key, hash_threshold):
+        # 图像无变化，无需OCR
+        return score, ""
+    
+    # 第三层：OCR识别（仅在内容变化时执行）
+    chat_region = tuple(shop_config.get("chat_region", region))
+    chat_img = screenshot_region(chat_region)
+    
+    # 使用带缓存的OCR
+    text = ocr_text_cached(chat_img)
+    
+    # 去重检查
+    if is_duplicate_message(text, shop_id):
+        return score, ""  # 重复消息，返回空文本
+    
+    return score, text or ""
+
+
+def calculate_image_hash(image: Image.Image) -> str:
+    """计算图像的感知哈希值用于快速对比"""
+    # 使用差异哈希（dHash），对图像变化敏感
+    return str(imagehash.dhash(image, hash_size=8))
+
+
+def get_region_cache_key(shop_id: int, region: Tuple[int, int, int, int]) -> str:
+    """生成区域缓存键"""
+    return f"shop_{shop_id}_region_{region[0]}_{region[1]}_{region[2]}_{region[3]}"
+
+
+def has_region_changed(image: Image.Image, cache_key: str, 
+                       hash_threshold: int = 5) -> bool:
+    """检测区域图像是否发生变化
+    
+    Args:
+        image: 当前截图
+        cache_key: 缓存键
+        hash_threshold: 哈希差异阈值（默认5，值越小越敏感）
+    
+    Returns:
+        True if 图像有变化，False otherwise
+    """
+    global _region_hash_cache
+    
+    current_hash = calculate_image_hash(image)
+    
+    if cache_key not in _region_hash_cache:
+        # 首次检测，记录并返回True
+        _region_hash_cache[cache_key] = current_hash
+        return True
+    
+    # 计算哈希差异
+    last_hash = _region_hash_cache[cache_key]
+    hash_diff = imagehash.hex_to_hash(current_hash) - imagehash.hex_to_hash(last_hash)
+    
+    if hash_diff > hash_threshold:
+        # 图像有显著变化，更新缓存
+        _region_hash_cache[cache_key] = current_hash
+        return True
+    
+    return False
+
+
+def get_cached_ocr_result(image_hash: str, max_age_seconds: int = 60) -> Optional[str]:
+    """从缓存获取OCR结果"""
+    global _ocr_result_cache
+    
+    if image_hash in _ocr_result_cache:
+        text, timestamp = _ocr_result_cache[image_hash]
+        # 检查缓存是否过期
+        if (datetime.now() - timestamp).total_seconds() < max_age_seconds:
+            return text
+        else:
+            # 过期，删除缓存
+            del _ocr_result_cache[image_hash]
+    
+    return None
+
+
+def cache_ocr_result(image_hash: str, text: str):
+    """缓存OCR结果"""
+    global _ocr_result_cache
+    
+    # 限制缓存大小，超过100条时清理最旧的
+    if len(_ocr_result_cache) > 100:
+        # 按时间排序，删除最旧的20条
+        sorted_cache = sorted(_ocr_result_cache.items(), 
+                            key=lambda x: x[1][1])
+        for key, _ in sorted_cache[:20]:
+            del _ocr_result_cache[key]
+    
+    _ocr_result_cache[image_hash] = (text, datetime.now())
+
+
+def ocr_text_cached(image: Image.Image) -> str:
+    """带缓存的OCR识别"""
+    # 计算图像哈希
+    image_hash = calculate_image_hash(image)
+    
+    # 尝试从缓存获取
+    cached_result = get_cached_ocr_result(image_hash)
+    if cached_result is not None:
+        return cached_result
+    
+    # 缓存未命中，执行OCR
+    text = ocr_text_with_retry(image)
+    
+    # 缓存结果
+    if text:
+        cache_ocr_result(image_hash, text)
+    
+    return text
+
+
+def cleanup_caches():
+    """清理所有缓存"""
+    global _message_cache, _region_hash_cache, _ocr_result_cache
+    global _cache_cleanup_time
+    
+    now = datetime.now()
+    
+    # 清理消息缓存（每10分钟）
+    if now - _cache_cleanup_time > timedelta(minutes=10):
+        _message_cache.clear()
+        _cache_cleanup_time = now
+    
+    # 清理过期的OCR结果缓存（每5分钟）
+    expired_keys = []
+    for img_hash, (_, timestamp) in _ocr_result_cache.items():
+        if (now - timestamp).total_seconds() > 300:  # 5分钟过期
+            expired_keys.append(img_hash)
+    
+    for key in expired_keys:
+        del _ocr_result_cache[key]
+    
+    # 清理区域哈希缓存（如果超过50个店铺区域）
+    if len(_region_hash_cache) > 50:
+        _region_hash_cache.clear()
 
 
